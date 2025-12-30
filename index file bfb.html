@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Interactive map showing Books from Birth program coverage across North Carolina, including all 100 counties, hospitals with maternity services, and maternity care deserts.">
+    <title>Books from Birth - NC Interactive Map</title>
+    
+    <!-- D3.js with fallback -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        // Fallback for D3 if primary CDN fails
+        if (typeof d3 === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/d3@7"><\/script>');
+        }
+    </script>
+    
+    <!-- TopoJSON with fallback -->
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <script>
+        // Fallback for TopoJSON if primary CDN fails
+        if (typeof topojson === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/topojson@3"><\/script>');
+        }
+    </script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: white;
+            -webkit-text-size-adjust: 100%;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            background: white;
+            padding: 10px;
+            position: relative;
+            page-break-inside: avoid;
+        }
+        
+        /* Desktop styles */
+        @media (min-width: 768px) {
+            .container {
+                max-width: 1200px;
+                padding: 20px;
+            }
+        }
+        
+        h1 {
+            text-align: center;
+            margin: 0 0 4px 0;
+            font-size: 18px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            font-weight: 600;
+            letter-spacing: 0px;
+            font-style: normal;
+            color: #000000;
+            line-height: 1.3;
+        }
+        
+        /* Desktop title size */
+        @media (min-width: 768px) {
+            h1 {
+                font-size: 22px;
+            }
+        }
+        
+        .orange-divider {
+            width: 100%;
+            height: 2px;
+            background: #F15A29;
+            margin: 2px 0 3px 0;
+        }
+        
+        #map {
+            width: 100%;
+            height: 400px;
+            border: none;
+            position: relative;
+        }
+        
+        /* Larger map on desktop */
+        @media (min-width: 768px) {
+            #map {
+                height: 500px;
+            }
+        }
+        
+        @media (min-width: 1024px) {
+            #map {
+                height: 550px;
+            }
+        }
+        
+        .county {
+            stroke: #000000;
+            stroke-width: 0.5;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .county:hover {
+            opacity: 0.8;
+            stroke: #000;
+            stroke-width: 1.5;
+        }
+        
+        .region-1 { fill: #66C7EA; }  /* Lighter Blue - toned down */
+        .region-2 { fill: #D9696C; }  /* Lighter Red - toned down */
+        .region-3 { fill: #A4D47E; }  /* Lighter Green - toned down */
+        .region-4 { fill: #F69666; }  /* Lighter Orange - toned down */
+        .region-5 { fill: #F366B3; }  /* Lighter Magenta - toned down */
+        .region-6 { fill: #FDCC7D; }  /* Lighter Yellow - toned down */
+        
+        .maternity-desert {
+            fill: url(#crosshatch-pattern);
+        }
+        
+        .county-label {
+            font-size: 7px;
+            fill: #ffffff;
+            text-anchor: middle;
+            pointer-events: none;
+            font-weight: 600;
+            text-shadow: 0 0 3px rgba(0,0,0,0.7), 0 0 5px rgba(0,0,0,0.5);
+        }
+        
+        .region-label {
+            font-size: 16px;
+            font-weight: bold;
+            fill: #ffffff;
+            text-anchor: middle;
+            cursor: pointer;
+            text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7);
+            pointer-events: all;
+            transition: all 0.2s;
+        }
+        
+        .region-label:hover {
+            fill: #ffff00;
+            font-size: 18px;
+            text-shadow: 0 0 12px rgba(0,0,0,1), 0 0 6px rgba(0,0,0,0.8);
+        }
+        
+        .region-button {
+            fill: rgba(255,255,255,0.1);
+            stroke: #ffffff;
+            stroke-width: 2;
+            stroke-dasharray: 5,5;
+            cursor: pointer;
+            pointer-events: all;
+            transition: all 0.2s;
+        }
+        
+        .region-button:hover {
+            fill: rgba(255,255,255,0.3);
+            stroke-width: 3;
+        }
+        
+        .hospital-marker {
+            fill: #d32f2f;
+            stroke: #ffffff;
+            stroke-width: 1.5;
+            cursor: pointer;
+            transition: all 0.2s;
+            pointer-events: all;
+        }
+        
+        .hospital-marker:hover {
+            fill: #ff5252;
+            stroke-width: 2.5;
+            filter: drop-shadow(0 0 4px rgba(255, 82, 82, 0.8));
+        }
+        
+        .state-boundary {
+            fill: none;
+            stroke: #000000;
+            stroke-width: 1;
+        }
+        
+        .tooltip {
+            position: absolute;
+            padding: 16px 20px;
+            background: #FFF8DC;
+            color: #333;
+            border-radius: 8px;
+            font-size: 13px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            max-width: 450px;
+            max-height: 600px;
+            overflow-y: auto;
+            z-index: 1000;
+            line-height: 1.6;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border: 1px solid #D2B48C;
+        }
+        
+        .tooltip-title {
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #8B4513;
+            border-bottom: 2px solid #D2B48C;
+            padding-bottom: 8px;
+        }
+        
+        .tooltip-subtitle {
+            font-weight: 600;
+            color: #B8860B;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+        
+        .tooltip-info {
+            color: #4A4A4A;
+            font-size: 12px;
+            margin: 5px 0;
+        }
+        
+        .tooltip-hospital-list {
+            margin-top: 10px;
+        }
+        
+        .tooltip-hospital-item {
+            margin: 8px 0;
+            padding: 8px;
+            background: rgba(210, 180, 140, 0.2);
+            border-radius: 4px;
+            border-left: 3px solid #8B4513;
+        }
+        
+        .hospital-name {
+            font-weight: 600;
+            color: #2F4F4F;
+            font-size: 13px;
+        }
+        
+        .hospital-details {
+            color: #696969;
+            font-size: 11px;
+            margin-top: 3px;
+        }
+        
+        .no-hospitals {
+            color: #DC143C;
+            font-style: italic;
+            padding: 8px;
+            background: rgba(255,100,100,0.15);
+            border-radius: 4px;
+            margin-top: 6px;
+        }
+        
+        .legend-container {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 4px;
+            padding: 6px;
+            background: #f8f9fa;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        @media (min-width: 768px) {
+            .legend-container {
+                padding: 8px;
+                gap: 8px;
+            }
+        }
+        
+        .legend-section {
+            flex: 1;
+            min-width: 140px;
+            margin: 2px;
+        }
+        
+        @media (min-width: 768px) {
+            .legend-section {
+                min-width: 180px;
+            }
+        }
+        
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 3px;
+            font-size: 9px;
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 2px;
+        }
+        
+        @media (min-width: 768px) {
+            .legend-title {
+                font-size: 10px;
+            }
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+            font-size: 8px;
+            line-height: 1.4;
+        }
+        
+        @media (min-width: 768px) {
+            .legend-item {
+                font-size: 10px;
+            }
+        }
+        
+        .legend-instructions {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #ddd;
+        }
+        
+        @media (min-width: 768px) {
+            .legend-instructions {
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+        }
+        
+        .instruction-item {
+            display: flex;
+            align-items: flex-start;
+            margin: 2px 0;
+            font-size: 9px;
+            line-height: 1.4;
+        }
+        
+        @media (min-width: 768px) {
+            .instruction-item {
+                font-size: 11px;
+            }
+        }
+        
+        .instruction-icon {
+            margin-right: 8px;
+            flex-shrink: 0;
+            font-weight: bold;
+        }
+        
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 2px;
+            margin-right: 4px;
+            border: 1px solid rgba(0,0,0,0.2);
+            flex-shrink: 0;
+        }
+        
+        .legend-star {
+            width: 14px;
+            height: 14px;
+            margin-right: 4px;
+            flex-shrink: 0;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-top: 4px;
+            padding: 4px;
+            background: #f8f9fa;
+        }
+        
+        .controls button {
+            margin: 0 3px;
+            padding: 4px 8px;
+            background: #4a90a4;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 8px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .controls button:hover {
+            background: #3a7085;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 10px;
+        }
+        
+        @media print {
+            body {
+                padding: 0;
+                background: white;
+                margin: 0;
+            }
+            .container {
+                max-width: 100%;
+                padding: 0.15in;
+                box-shadow: none;
+                border-radius: 0;
+            }
+            .controls {
+                display: none;
+            }
+            @page {
+                size: 11in 8.5in;
+                margin: 0.4in;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Books from Birth - Books for EVERY BABY in North Carolina!</h1>
+        
+        <div class="orange-divider"></div>
+        
+        <div id="map">
+            <div class="loading">
+                <div style="text-align: center; padding: 100px 20px; color: #666;">
+                    <div style="font-size: 18px; margin-bottom: 10px;">📊 Loading Interactive Map...</div>
+                    <div style="font-size: 14px;">Please wait while we load the map data</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls" style="display: none;">
+        </div>
+        
+        <div class="legend-container">
+            <div class="legend-section">
+                <div class="legend-title">Maternity Service Regions</div>
+                <div class="legend-item">
+                    <svg class="legend-color" width="20" height="20" style="margin-right: 8px;">
+                        <defs>
+                            <pattern id="legend-pattern" patternUnits="userSpaceOnUse" width="8" height="8">
+                                <circle cx="2" cy="2" r="0.8" fill="rgba(0, 0, 0, 0.65)"/>
+                                <circle cx="6" cy="6" r="0.8" fill="rgba(0, 0, 0, 0.65)"/>
+                            </pattern>
+                        </defs>
+                        <rect width="20" height="20" fill="url(#legend-pattern)" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
+                    </svg>
+                    <span>⚠️ Dot pattern = Maternity care deserts (no hospital services)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #66C7EA;"></div>
+                    <span>Region 1: Charlotte Metro (~26K births/yr)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #D9696C;"></div>
+                    <span>Region 2: Triad (~19K births/yr)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #A4D47E;"></div>
+                    <span>Region 3: Triangle (~23K births/yr)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #F69666;"></div>
+                    <span>Region 4: Eastern NC (~17K births/yr)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #F366B3;"></div>
+                    <span>Region 5: Western NC (~14K births/yr)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #FDCC7D;"></div>
+                    <span>Region 6: Southeastern NC (~18K births/yr)</span>
+                </div>
+            </div>
+            
+            <div class="legend-section">
+                <div class="legend-title">Hospital Markers & Interactions</div>
+                <div class="legend-item">
+                    <span class="instruction-icon" style="color: #d32f2f; font-size: 12px;">★</span>
+                    <span>Red star = Hospital with maternity services</span>
+                </div>
+                <div class="legend-item">
+                    <svg class="instruction-icon" viewBox="0 0 20 20" style="width: 14px; height: 14px; margin-right: 8px; flex-shrink: 0;">
+                        <path d="M10,2 L12,8 L18,8 L13,12 L15,18 L10,14 L5,18 L7,12 L2,8 L8,8 Z" 
+                              fill="#d32f2f" stroke="#fff" stroke-width="1.5"/>
+                    </svg>
+                    <span>Star size indicates birth volume</span>
+                </div>
+                <div class="legend-item">
+                    <span class="instruction-icon">⚠️</span>
+                    <span>Dot pattern overlay = Maternity care deserts (no services)</span>
+                </div>
+                
+                <div class="legend-instructions">
+                    <div class="instruction-item">
+                        <span class="instruction-icon">→</span>
+                        <span>Hover counties to see all hospitals</span>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="instruction-icon">→</span>
+                        <span>Click region buttons (below map) or counties for summary</span>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="instruction-icon">→</span>
+                        <span>Click stars for individual hospital details</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        let svg, g, projection, path, zoom, labelsVisible = false, regionLabelsVisible = true;
+        const tooltip = d3.select("#tooltip");
+        
+        // Region definitions
+        const regionNames = {
+            1: "Charlotte Metro",
+            2: "Triad",
+            3: "Triangle",
+            4: "Eastern NC",
+            5: "Western NC",
+            6: "Southeastern NC"
+        };
+        
+        // Region label positions (approximate centroids for each region)
+        const regionLabelPositions = {
+            1: { lat: 35.3, lon: -80.7 },  // Charlotte Metro
+            2: { lat: 36.0, lon: -80.0 },  // Triad
+            3: { lat: 35.9, lon: -78.7 },  // Triangle
+            4: { lat: 35.5, lon: -77.2 },  // Eastern
+            5: { lat: 35.6, lon: -82.3 },  // Western
+            6: { lat: 34.8, lon: -78.7 }   // Southeastern
+        };
+        
+        // County to Region mapping
+        const countyRegions = {
+            "Alamance": 2, "Alexander": 5, "Alleghany": 5, "Anson": 1,
+            "Ashe": 5, "Avery": 5, "Beaufort": 4, "Bertie": 4,
+            "Bladen": 6, "Brunswick": 6, "Buncombe": 5, "Burke": 5,
+            "Cabarrus": 1, "Caldwell": 5, "Camden": 4, "Carteret": 4,
+            "Caswell": 2, "Catawba": 1, "Chatham": 3, "Cherokee": 5,
+            "Chowan": 4, "Clay": 5, "Cleveland": 1, "Columbus": 6,
+            "Craven": 4, "Cumberland": 6, "Currituck": 4, "Dare": 4,
+            "Davidson": 2, "Davie": 2, "Duplin": 4, "Durham": 3,
+            "Edgecombe": 4, "Forsyth": 2, "Franklin": 3, "Gaston": 1,
+            "Gates": 4, "Graham": 5, "Granville": 3, "Greene": 4,
+            "Guilford": 2, "Halifax": 4, "Harnett": 6, "Haywood": 5,
+            "Henderson": 5, "Hertford": 4, "Hoke": 6, "Hyde": 4,
+            "Iredell": 1, "Jackson": 5, "Johnston": 3, "Jones": 4,
+            "Lee": 6, "Lenoir": 4, "Lincoln": 1, "Macon": 5,
+            "Madison": 5, "Martin": 4, "McDowell": 5, "Mecklenburg": 1,
+            "Mitchell": 5, "Montgomery": 6, "Moore": 6, "Nash": 4,
+            "New Hanover": 6, "Northampton": 4, "Onslow": 4, "Orange": 3,
+            "Pamlico": 4, "Pasquotank": 4, "Pender": 6, "Perquimans": 4,
+            "Person": 3, "Pitt": 4, "Polk": 5, "Randolph": 2,
+            "Richmond": 1, "Robeson": 6, "Rockingham": 2, "Rowan": 1,
+            "Rutherford": 5, "Sampson": 4, "Scotland": 6, "Stanly": 1,
+            "Stokes": 2, "Surry": 2, "Swain": 5, "Transylvania": 5,
+            "Tyrrell": 4, "Union": 1, "Vance": 3, "Wake": 3,
+            "Warren": 3, "Washington": 4, "Watauga": 5, "Wayne": 4,
+            "Wilkes": 5, "Wilson": 4, "Yadkin": 2, "Yancey": 5
+        };
+        
+        // Hospital data with county information
+        const hospitals = [
+            // Region 1: Charlotte Metro
+            {name: "Carolinas Medical Center", city: "Charlotte", county: "Mecklenburg", lat: 35.2271, lon: -80.8431, births: 5286, system: "Atrium Health"},
+            {name: "Atrium Health Pineville", city: "Pineville", county: "Mecklenburg", lat: 35.0832, lon: -80.8787, births: 3500, system: "Atrium Health"},
+            {name: "Atrium Health University City", city: "Charlotte", county: "Mecklenburg", lat: 35.2527, lon: -80.7332, births: 2500, system: "Atrium Health"},
+            {name: "Atrium Health Cabarrus", city: "Concord", county: "Cabarrus", lat: 35.4093, lon: -80.5795, births: 2800, system: "Atrium Health"},
+            {name: "Atrium Health Union", city: "Monroe", county: "Union", lat: 34.9854, lon: -80.5495, births: 1500, system: "Atrium Health"},
+            {name: "Atrium Health Cleveland", city: "Shelby", county: "Cleveland", lat: 35.2946, lon: -81.5348, births: 1200, system: "Atrium Health"},
+            {name: "Atrium Health Lincoln", city: "Lincolnton", county: "Lincoln", lat: 35.4735, lon: -81.2545, births: 1000, system: "Atrium Health"},
+            {name: "Atrium Health Stanly", city: "Albemarle", county: "Stanly", lat: 35.3501, lon: -80.2000, births: 900, system: "Atrium Health"},
+            {name: "Novant Health Presbyterian", city: "Charlotte", county: "Mecklenburg", lat: 35.2294, lon: -80.8247, births: 3800, system: "Novant Health"},
+            {name: "Novant Health Matthews", city: "Matthews", county: "Mecklenburg", lat: 35.1168, lon: -80.7232, births: 2500, system: "Novant Health"},
+            {name: "Novant Health Huntersville", city: "Huntersville", county: "Mecklenburg", lat: 35.4107, lon: -80.8428, births: 2500, system: "Novant Health"},
+            {name: "Novant Health Rowan", city: "Salisbury", county: "Rowan", lat: 35.6707, lon: -80.4742, births: 1200, system: "Novant Health"},
+            {name: "CaroMont Regional", city: "Gastonia", county: "Gaston", lat: 35.2621, lon: -81.1748, births: 2400, system: "CaroMont"},
+            
+            // Region 2: Triad
+            {name: "Wake Forest Baptist Medical Center", city: "Winston-Salem", county: "Forsyth", lat: 36.0999, lon: -80.2682, births: 2423, system: "Atrium Health Wake Forest Baptist"},
+            {name: "High Point Medical Center", city: "High Point", county: "Guilford", lat: 35.9907, lon: -79.9934, births: 1800, system: "Atrium Health Wake Forest Baptist"},
+            {name: "Lexington Medical Center", city: "Lexington", county: "Davidson", lat: 35.8240, lon: -80.2534, births: 700, system: "Atrium Health Wake Forest Baptist"},
+            {name: "Moses H. Cone Memorial Hospital", city: "Greensboro", county: "Guilford", lat: 36.0726, lon: -79.8309, births: 4252, system: "Cone Health"},
+            {name: "Wesley Long Hospital", city: "Greensboro", county: "Guilford", lat: 36.0596, lon: -79.8253, births: 1500, system: "Cone Health"},
+            {name: "Alamance Regional Medical Center", city: "Burlington", county: "Alamance", lat: 36.0957, lon: -79.4378, births: 1600, system: "Cone Health"},
+            {name: "Novant Health Forsyth Medical Center", city: "Winston-Salem", county: "Forsyth", lat: 36.0726, lon: -80.2879, births: 3178, system: "Novant Health"},
+            {name: "Novant Health Thomasville", city: "Thomasville", county: "Davidson", lat: 35.8826, lon: -80.0820, births: 800, system: "Novant Health"},
+            {name: "Novant Health Kernersville", city: "Kernersville", county: "Forsyth", lat: 36.1199, lon: -80.0737, births: 600, system: "Novant Health"},
+            
+            // Region 3: Triangle
+            {name: "WakeMed Raleigh Campus", city: "Raleigh", county: "Wake", lat: 35.7796, lon: -78.6382, births: 5500, system: "WakeMed"},
+            {name: "WakeMed Cary Hospital", city: "Cary", county: "Wake", lat: 35.7915, lon: -78.7811, births: 3000, system: "WakeMed"},
+            {name: "WakeMed North Hospital", city: "Raleigh", county: "Wake", lat: 35.8760, lon: -78.6089, births: 2500, system: "WakeMed"},
+            {name: "UNC Hospitals", city: "Chapel Hill", county: "Orange", lat: 35.9132, lon: -79.0558, births: 3500, system: "UNC Health"},
+            {name: "UNC Rex Hospital", city: "Raleigh", county: "Wake", lat: 35.8087, lon: -78.6382, births: 3000, system: "UNC Health"},
+            {name: "UNC Health Chatham", city: "Siler City", county: "Chatham", lat: 35.7235, lon: -79.4625, births: 600, system: "UNC Health"},
+            {name: "UNC Health Nash", city: "Rocky Mount", county: "Nash", lat: 35.9382, lon: -77.7905, births: 1200, system: "UNC Health"},
+            {name: "Wayne UNC Health Care", city: "Goldsboro", county: "Wayne", lat: 35.3849, lon: -77.9928, births: 1400, system: "UNC Health"},
+            {name: "Duke University Hospital", city: "Durham", county: "Durham", lat: 36.0103, lon: -78.9382, births: 3000, system: "Duke Health"},
+            {name: "Duke Regional Hospital", city: "Durham", county: "Durham", lat: 35.9940, lon: -78.8986, births: 2000, system: "Duke Health"},
+            {name: "Duke Raleigh Hospital", city: "Raleigh", county: "Wake", lat: 35.8568, lon: -78.6094, births: 1500, system: "Duke Health"},
+            
+            // Region 4: Eastern NC
+            {name: "ECU Health Medical Center", city: "Greenville", county: "Pitt", lat: 35.6127, lon: -77.3664, births: 3200, system: "ECU Health"},
+            {name: "ECU Health Roanoke-Chowan", city: "Ahoskie", county: "Hertford", lat: 36.2865, lon: -76.9830, births: 800, system: "ECU Health"},
+            {name: "ECU Health Duplin Hospital", city: "Kenansville", county: "Duplin", lat: 34.9626, lon: -77.9628, births: 500, system: "ECU Health"},
+            {name: "Onslow Memorial Hospital", city: "Jacksonville", county: "Onslow", lat: 34.7540, lon: -77.4302, births: 2200, system: "Onslow Memorial"},
+            {name: "Vidant Beaufort Hospital", city: "Washington", county: "Beaufort", lat: 35.5465, lon: -77.0522, births: 700, system: "Vidant Health"},
+            {name: "Vidant Edgecombe Hospital", city: "Tarboro", county: "Edgecombe", lat: 35.8968, lon: -77.5358, births: 600, system: "Vidant Health"},
+            
+            // Region 5: Western NC
+            {name: "Mission Hospital", city: "Asheville", county: "Buncombe", lat: 35.5951, lon: -82.5515, births: 4500, system: "HCA Healthcare"},
+            {name: "Margaret R. Pardee Memorial Hospital", city: "Hendersonville", county: "Henderson", lat: 35.3187, lon: -82.4610, births: 1300, system: "Pardee UNC Health"},
+            {name: "Blue Ridge Regional Hospital", city: "Spruce Pine", county: "Mitchell", lat: 35.9151, lon: -82.0651, births: 400, system: "Mission Health"},
+            {name: "Angel Medical Center", city: "Franklin", county: "Macon", lat: 35.1823, lon: -83.3816, births: 300, system: "Mission Health"},
+            {name: "Charles A. Cannon Memorial Hospital", city: "Banner Elk", county: "Avery", lat: 36.1626, lon: -81.8712, births: 250, system: "Appalachian Regional"},
+            {name: "Caldwell UNC Health Care", city: "Lenoir", county: "Caldwell", lat: 35.9140, lon: -81.5390, births: 800, system: "UNC Health"},
+            {name: "Frye Regional Medical Center", city: "Hickory", county: "Catawba", lat: 35.7345, lon: -81.3412, births: 1500, system: "Atrium Health"},
+            {name: "Catawba Valley Medical Center", city: "Hickory", county: "Catawba", lat: 35.7629, lon: -81.3553, births: 1200, system: "Catawba Valley"},
+            
+            // Region 6: Southeastern NC
+            {name: "Cape Fear Valley Medical Center", city: "Fayetteville", county: "Cumberland", lat: 35.0527, lon: -78.8784, births: 4800, system: "Cape Fear Valley"},
+            {name: "Novant Health New Hanover Regional", city: "Wilmington", county: "New Hanover", lat: 34.2257, lon: -77.8868, births: 4200, system: "Novant Health"},
+            {name: "FirstHealth Moore Regional Hospital", city: "Pinehurst", county: "Moore", lat: 35.1951, lon: -79.4670, births: 2500, system: "FirstHealth"},
+            {name: "Southeastern Health", city: "Lumberton", county: "Robeson", lat: 34.6379, lon: -79.0086, births: 1800, system: "Southeastern Health"},
+            {name: "Columbus Regional Healthcare", city: "Whiteville", county: "Columbus", lat: 34.3388, lon: -78.7028, births: 800, system: "Columbus Regional"},
+            {name: "Central Harnett Hospital", city: "Lillington", county: "Harnett", lat: 35.3985, lon: -78.8153, births: 1000, system: "Central Harnett"},
+            {name: "Betsy Johnson Hospital", city: "Dunn", county: "Harnett", lat: 35.3085, lon: -78.6086, births: 700, system: "Betsy Johnson"}
+        ];
+        
+        // Maternity care deserts - counties with NO hospitals
+        const maternityDeserts = [
+            "Bertie", "Camden", "Chowan", "Clay", "Currituck", "Dare", "Gates",
+            "Graham", "Greene", "Hyde", "Jones", "Montgomery", "Northampton",
+            "Pamlico", "Perquimans", "Polk", "Swain", "Tyrrell", "Warren", "Washington"
+        ];
+        
+        // Get counties in a region
+        function getCountiesInRegion(regionNum) {
+            return Object.keys(countyRegions).filter(county => countyRegions[county] === regionNum);
+        }
+        
+        // Get hospitals in a region
+        function getHospitalsInRegion(regionNum) {
+            const regionCounties = getCountiesInRegion(regionNum);
+            return hospitals.filter(h => regionCounties.includes(h.county));
+        }
+        
+        // Get hospitals in a county
+        function getHospitalsInCounty(countyName) {
+            return hospitals.filter(h => h.county === countyName);
+        }
+        
+        // Get region color (Toned-down Books from Birth palette)
+        function getRegionColor(regionNum) {
+            const colors = {
+                1: '#66C7EA',  // Lighter Blue - toned down
+                2: '#D9696C',  // Lighter Red - toned down
+                3: '#A4D47E',  // Lighter Green - toned down
+                4: '#F69666',  // Lighter Orange - toned down
+                5: '#F366B3',  // Lighter Magenta - toned down
+                6: '#FDCC7D'   // Lighter Yellow - toned down
+            };
+            return colors[regionNum] || '#999';
+        }
+        
+        // Get maternity deserts in a region
+        function getDesertsInRegion(regionNum) {
+            const regionCounties = getCountiesInRegion(regionNum);
+            return maternityDeserts.filter(desert => regionCounties.includes(desert));
+        }
+        
+        // Show region summary
+        function showRegionSummary(regionNum) {
+            const regionName = regionNames[regionNum];
+            const counties = getCountiesInRegion(regionNum);
+            const regionHospitals = getHospitalsInRegion(regionNum);
+            const deserts = getDesertsInRegion(regionNum);
+            const totalBirths = regionHospitals.reduce((sum, h) => sum + h.births, 0);
+            const needToRaise = totalBirths * 100;
+            
+            let message = `═══════════════════════════════════════\n`;
+            message += `${regionName.toUpperCase()}\n`;
+            message += `═══════════════════════════════════════\n\n`;
+            
+            message += `📊 REGIONAL STATISTICS:\n`;
+            message += `─────────────────────────────────────\n`;
+            message += `Counties in Region: ${counties.length}\n`;
+            message += `Hospitals with Maternity Services: ${regionHospitals.length}\n`;
+            message += `Annual Births: ${totalBirths.toLocaleString()}\n`;
+            message += `Maternity Care Deserts: ${deserts.length}\n`;
+            if (deserts.length > 0) {
+                message += `  • ${deserts.join(', ')}\n`;
+            }
+            message += `\n`;
+            
+            message += `💰 BOOKS FOR EVERY BABY\n`;
+            message += `─────────────────────────────────────\n`;
+            message += `Need to Raise: $${needToRaise.toLocaleString()}\n\n`;
+            
+            message += `🏥 HOSPITALS IN THIS REGION:\n`;
+            message += `─────────────────────────────────────\n`;
+            
+            // Group hospitals by county
+            const hospitalsByCounty = {};
+            regionHospitals.forEach(h => {
+                if (!hospitalsByCounty[h.county]) {
+                    hospitalsByCounty[h.county] = [];
+                }
+                hospitalsByCounty[h.county].push(h);
+            });
+            
+            Object.keys(hospitalsByCounty).sort().forEach(county => {
+                message += `\n${county} County:\n`;
+                hospitalsByCounty[county].forEach(h => {
+                    message += `  ★ ${h.name}\n`;
+                    message += `     ${h.city} • ${h.system}\n`;
+                    message += `     ${h.births.toLocaleString()} births/year\n`;
+                });
+            });
+            
+            alert(message);
+        }
+        
+        // Calculate marker size based on births
+        function getMarkerSize(births) {
+            if (births >= 5000) return 14;
+            if (births >= 3000) return 11;
+            if (births >= 2000) return 9;
+            if (births >= 1000) return 7;
+            return 5;
+        }
+        
+        // Create star path
+        function createStarPath(cx, cy, size) {
+            const outerRadius = size;
+            const innerRadius = size * 0.4;
+            const points = 5;
+            let path = '';
+            
+            for (let i = 0; i < points * 2; i++) {
+                const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const angle = (Math.PI / points) * i - Math.PI / 2;
+                const x = cx + radius * Math.cos(angle);
+                const y = cy + radius * Math.sin(angle);
+                path += (i === 0 ? 'M' : 'L') + x + ',' + y;
+            }
+            path += 'Z';
+            return path;
+        }
+        
+        // Initialize the map
+        async function initMap() {
+            // Check if required libraries are loaded
+            if (typeof d3 === 'undefined') {
+                console.error('D3.js library not loaded');
+                document.getElementById('map').innerHTML = '<div style="padding: 40px; text-align: center; color: #d32f2f; font-size: 14px;">⚠️ Error: D3.js library failed to load.<br><br>Please ensure you have an internet connection and refresh the page.<br><br>If using Chrome, you may need to run a local web server instead of opening the file directly.</div>';
+                return;
+            }
+            if (typeof topojson === 'undefined') {
+                console.error('TopoJSON library not loaded');
+                document.getElementById('map').innerHTML = '<div style="padding: 40px; text-align: center; color: #d32f2f; font-size: 14px;">⚠️ Error: TopoJSON library failed to load.<br><br>Please ensure you have an internet connection and refresh the page.</div>';
+                return;
+            }
+            
+            // Check if file is being opened locally
+            if (window.location.protocol === 'file:') {
+                console.warn('File opened via file:// protocol - may have CORS restrictions');
+            }
+            
+            const width = document.getElementById('map').clientWidth;
+            // Responsive height based on screen size
+            const height = window.innerWidth < 768 ? 400 : (window.innerWidth < 1024 ? 500 : 550);
+            
+            // Clear loading message
+            d3.select("#map").html("");
+            
+            // Create SVG
+            svg = d3.select("#map")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+            
+            // Add pattern definition for maternity deserts - small dots overlay
+            const defs = svg.append("defs");
+            
+            // Create a pattern with small dots
+            const pattern = defs.append("pattern")
+                .attr("id", "crosshatch-pattern")
+                .attr("patternUnits", "userSpaceOnUse")
+                .attr("width", 8)
+                .attr("height", 8);
+            
+            // Add small dots to the pattern (darker)
+            pattern.append("circle")
+                .attr("cx", 2)
+                .attr("cy", 2)
+                .attr("r", 0.8)
+                .attr("fill", "rgba(0, 0, 0, 0.65)");
+            
+            pattern.append("circle")
+                .attr("cx", 6)
+                .attr("cy", 6)
+                .attr("r", 0.8)
+                .attr("fill", "rgba(0, 0, 0, 0.65)");
+            
+            // Add zoom behavior
+            // Setup zoom behavior
+            zoom = d3.zoom()
+                .scaleExtent([1, 8])
+                .on("zoom", (event) => {
+                    g.attr("transform", event.transform);
+                });
+            
+            svg.call(zoom);
+            
+            g = svg.append("g");
+            
+            // Fetch North Carolina county data
+            try {
+                console.log('Fetching map data from CDN...');
+                const response = await fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json");
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const us = await response.json();
+                console.log('Map data loaded successfully');
+                
+                // NC FIPS code is 37
+                const nc = topojson.feature(us, us.objects.counties);
+                const ncCounties = nc.features.filter(d => d.id.toString().startsWith("37"));
+                
+                // Create projection centered on NC with padding
+                const mapWidth = width - 200;
+                const mapHeight = height - 160;
+                
+                projection = d3.geoMercator()
+                    .fitSize([mapWidth, mapHeight], {
+                        type: "FeatureCollection",
+                        features: ncCounties
+                    });
+                
+                path = d3.geoPath().projection(projection);
+                
+                // Center map horizontally and position 0.5" (48px at 96 DPI) below header
+                const horizontalCenter = (width - mapWidth) / 2;
+                g.attr("transform", `translate(${horizontalCenter}, 48)`);
+                
+                // Draw counties with regional colors
+                g.selectAll(".county")
+                    .data(ncCounties)
+                    .enter()
+                    .append("path")
+                    .attr("class", d => {
+                        const countyName = getCountyName(d.id);
+                        const region = countyRegions[countyName] || 1;
+                        return `county region-${region}`;
+                    })
+                    .attr("d", path)
+                    .on("mouseover", function(event, d) {
+                        const countyName = getCountyName(d.id);
+                        const region = countyRegions[countyName] || 1;
+                        const regionName = regionNames[region];
+                        const countyHospitals = getHospitalsInCounty(countyName);
+                        
+                        d3.select(this).style("opacity", 0.8);
+                        
+                        let tooltipContent = `<div class="tooltip-title">${countyName} County</div>`;
+                        tooltipContent += `<div class="tooltip-info">Region: ${regionName}</div>`;
+                        
+                        if (countyHospitals.length > 0) {
+                            const totalBirths = countyHospitals.reduce((sum, h) => sum + h.births, 0);
+                            tooltipContent += `<div class="tooltip-subtitle">🏥 Hospitals with Maternity Services (${countyHospitals.length})</div>`;
+                            tooltipContent += `<div class="tooltip-info">Total Annual Births: ${totalBirths.toLocaleString()}</div>`;
+                            tooltipContent += `<div class="tooltip-hospital-list">`;
+                            
+                            countyHospitals.forEach(h => {
+                                tooltipContent += `
+                                    <div class="tooltip-hospital-item">
+                                        <div class="hospital-name">★ ${h.name}</div>
+                                        <div class="hospital-details">${h.city} • ${h.system}</div>
+                                        <div class="hospital-details">👶 ${h.births.toLocaleString()} births/year</div>
+                                    </div>
+                                `;
+                            });
+                            
+                            tooltipContent += `</div>`;
+                        } else {
+                            tooltipContent += `<div class="no-hospitals">⚠️ No maternity services available in this county</div>`;
+                        }
+                        
+                        tooltip
+                            .style("opacity", 1)
+                            .html(tooltipContent)
+                            .style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 15) + "px");
+                    })
+                    .on("mouseout", function() {
+                        d3.select(this).style("opacity", 1);
+                        tooltip.style("opacity", 0);
+                    })
+                    .on("click", function(event, d) {
+                        event.stopPropagation();
+                        const countyName = getCountyName(d.id);
+                        const region = countyRegions[countyName] || 1;
+                        showRegionSummary(region);
+                    });
+                
+                // Add county labels (hidden by default)
+                g.selectAll(".county-label")
+                    .data(ncCounties)
+                    .enter()
+                    .append("text")
+                    .attr("class", "county-label")
+                    .attr("transform", d => {
+                        const centroid = path.centroid(d);
+                        return `translate(${centroid})`;
+                    })
+                    .text(d => getCountyName(d.id))
+                    .style("display", "none");
+                
+                // Add maternity desert overlay pattern (on top of county colors)
+                g.selectAll(".desert-overlay")
+                    .data(ncCounties.filter(d => maternityDeserts.includes(getCountyName(d.id))))
+                    .enter()
+                    .append("path")
+                    .attr("class", "desert-overlay")
+                    .attr("d", path)
+                    .style("fill", "url(#crosshatch-pattern)")
+                    .style("stroke", "none")
+                    .style("pointer-events", "none");
+                
+                // Add region buttons at bottom, centered with proper spacing
+                const buttonWidth = 115;
+                const buttonSpacing = 130;
+                const totalButtonsWidth = 6 * buttonSpacing - 15;
+                const startX = (width - totalButtonsWidth) / 2;
+                const buttonY = height - 40;
+                
+                const regionButtonPositions = [
+                    { region: 1, x: startX + (0 * buttonSpacing), y: buttonY, label: "Reg 1: Charlotte" },
+                    { region: 2, x: startX + (1 * buttonSpacing), y: buttonY, label: "Reg 2: Triad" },
+                    { region: 3, x: startX + (2 * buttonSpacing), y: buttonY, label: "Reg 3: Triangle" },
+                    { region: 4, x: startX + (3 * buttonSpacing), y: buttonY, label: "Reg 4: Eastern" },
+                    { region: 5, x: startX + (4 * buttonSpacing), y: buttonY, label: "Reg 5: Western" },
+                    { region: 6, x: startX + (5 * buttonSpacing), y: buttonY, label: "Reg 6: Southeast" }
+                ];
+                
+                regionButtonPositions.forEach(btn => {
+                    const regionGroup = svg.append("g")
+                        .attr("class", "region-button-group")
+                        .style("cursor", "pointer")
+                        .on("click", function(event) {
+                            event.stopPropagation();
+                            showRegionSummary(btn.region);
+                        });
+                    
+                    // Add button background with thicker solid border
+                    regionGroup.append("rect")
+                        .attr("class", `region-button region-${btn.region}`)
+                        .attr("x", btn.x - 55)
+                        .attr("y", btn.y - 12)
+                        .attr("width", 110)
+                        .attr("height", 24)
+                        .attr("rx", 4)
+                        .style("fill", getRegionColor(btn.region))
+                        .style("stroke", "#000000")
+                        .style("stroke-width", 2)
+                        .style("stroke-dasharray", "none")
+                        .style("opacity", 0.9);
+                    
+                    // Add button text
+                    regionGroup.append("text")
+                        .attr("x", btn.x)
+                        .attr("y", btn.y + 3)
+                        .attr("text-anchor", "middle")
+                        .style("fill", "#ffffff")
+                        .style("font-size", "8px")
+                        .style("font-weight", "bold")
+                        .style("pointer-events", "none")
+                        .style("text-shadow", "0 1px 2px rgba(0,0,0,0.5)")
+                        .text(btn.label);
+                    
+                    // Hover effect
+                    regionGroup.on("mouseenter", function() {
+                        d3.select(this).select("rect")
+                            .style("opacity", 1)
+                            .style("stroke-width", 3);
+                    }).on("mouseleave", function() {
+                        d3.select(this).select("rect")
+                            .style("opacity", 0.9)
+                            .style("stroke-width", 2);
+                    });
+                });
+                
+                // Add hospital markers as stars
+                g.selectAll(".hospital-marker")
+                    .data(hospitals)
+                    .enter()
+                    .append("path")
+                    .attr("class", "hospital-marker")
+                    .attr("d", d => {
+                        const coords = projection([d.lon, d.lat]);
+                        return createStarPath(coords[0], coords[1], getMarkerSize(d.births));
+                    })
+                    .on("mouseover", function(event, d) {
+                        d3.select(this).style("fill", "#ff5252");
+                        tooltip
+                            .style("opacity", 1)
+                            .html(`
+                                <div class="tooltip-title">★ ${d.name}</div>
+                                <div class="tooltip-info">📍 ${d.city}, ${d.county} County</div>
+                                <div class="tooltip-info">🏥 ${d.system}</div>
+                                <div class="tooltip-info">👶 ${d.births.toLocaleString()} births/year</div>
+                            `)
+                            .style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 15) + "px");
+                    })
+                    .on("mouseout", function(event, d) {
+                        d3.select(this).style("fill", "#d32f2f");
+                        tooltip.style("opacity", 0);
+                    })
+                    .on("click", function(event, d) {
+                        event.stopPropagation();
+                        alert(`${d.name}\n${d.city}, ${d.county} County\n${d.system}\n${d.births.toLocaleString()} births/year`);
+                    });
+                
+                // Add orange dividing line below region buttons with data citation
+                svg.append("line")
+                    .attr("x1", 0)
+                    .attr("y1", height - 15)
+                    .attr("x2", width)
+                    .attr("y2", height - 15)
+                    .style("stroke", "#F15A29")
+                    .style("stroke-width", 2);
+                
+                // Add data citation text centered on the orange footer line
+                svg.append("text")
+                    .attr("x", width / 2)
+                    .attr("y", height - 8)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "7px")
+                    .style("fill", "#666")
+                    .style("font-family", "Arial, sans-serif")
+                    .text("Data Sources: NC DHHS Perinatal Health, March of Dimes Maternity Care Deserts, Hospital System Reporting 2024");
+                    
+            } catch (error) {
+                console.error("Error loading map data:", error);
+                
+                // Determine error type and provide specific guidance
+                let errorMessage = "Unable to load map data";
+                let solution = "";
+                
+                if (window.location.protocol === 'file:') {
+                    errorMessage = "File opened locally - Browser security restrictions";
+                    solution = "SOLUTION: Upload this file to Google Drive, Dropbox, or GitHub Pages and open the shared link. OR use a web server (not double-clicking the file).";
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    errorMessage = "Network connection issue";
+                    solution = "SOLUTION: Check your internet connection and try refreshing the page.";
+                } else if (error.message.includes('HTTP error')) {
+                    errorMessage = "Server error loading map data";
+                    solution = "SOLUTION: The map data server may be temporarily unavailable. Try again in a few minutes.";
+                } else {
+                    errorMessage = error.message || "Unknown error";
+                    solution = "SOLUTION: Try refreshing the page or opening in a different browser (Chrome, Firefox, Safari, Edge).";
+                }
+                
+                // Create helpful error display
+                d3.select("#map").html("");
+                
+                const fallbackSvg = d3.select("#map")
+                    .append("svg")
+                    .attr("width", width)
+                    .attr("height", height);
+                
+                fallbackSvg.append("rect")
+                    .attr("width", width)
+                    .attr("height", height)
+                    .attr("fill", "#fff8f8");
+                
+                fallbackSvg.append("text")
+                    .attr("x", width / 2)
+                    .attr("y", height / 2 - 80)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "24px")
+                    .style("font-weight", "bold")
+                    .style("fill", "#d32f2f")
+                    .text("⚠️ Map Loading Error");
+                
+                fallbackSvg.append("text")
+                    .attr("x", width / 2)
+                    .attr("y", height / 2 - 40)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "14px")
+                    .style("fill", "#666")
+                    .style("font-weight", "bold")
+                    .text(errorMessage);
+                
+                // Split solution text for better readability
+                const solutionLines = solution.match(/.{1,60}(\s|$)/g) || [solution];
+                solutionLines.forEach((line, i) => {
+                    fallbackSvg.append("text")
+                        .attr("x", width / 2)
+                        .attr("y", height / 2 + (i * 20))
+                        .attr("text-anchor", "middle")
+                        .style("font-size", "13px")
+                        .style("fill", "#2196F3")
+                        .style("font-weight", "500")
+                        .text(line.trim());
+                });
+                
+                fallbackSvg.append("text")
+                    .attr("x", width / 2)
+                    .attr("y", height / 2 + 60)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "11px")
+                    .style("fill", "#999")
+                    .text("For best results: Upload to Google Drive or GitHub Pages and share the link");
+            }
+        }
+        
+        // Get county name from FIPS code
+        function getCountyName(fips) {
+            const countyFips = fips.toString().slice(-3);
+            const counties = {
+                "001": "Alamance", "003": "Alexander", "005": "Alleghany", "007": "Anson",
+                "009": "Ashe", "011": "Avery", "013": "Beaufort", "015": "Bertie",
+                "017": "Bladen", "019": "Brunswick", "021": "Buncombe", "023": "Burke",
+                "025": "Cabarrus", "027": "Caldwell", "029": "Camden", "031": "Carteret",
+                "033": "Caswell", "035": "Catawba", "037": "Chatham", "039": "Cherokee",
+                "041": "Chowan", "043": "Clay", "045": "Cleveland", "047": "Columbus",
+                "049": "Craven", "051": "Cumberland", "053": "Currituck", "055": "Dare",
+                "057": "Davidson", "059": "Davie", "061": "Duplin", "063": "Durham",
+                "065": "Edgecombe", "067": "Forsyth", "069": "Franklin", "071": "Gaston",
+                "073": "Gates", "075": "Graham", "077": "Granville", "079": "Greene",
+                "081": "Guilford", "083": "Halifax", "085": "Harnett", "087": "Haywood",
+                "089": "Henderson", "091": "Hertford", "093": "Hoke", "095": "Hyde",
+                "097": "Iredell", "099": "Jackson", "101": "Johnston", "103": "Jones",
+                "105": "Lee", "107": "Lenoir", "109": "Lincoln", "111": "McDowell",
+                "113": "Macon", "115": "Madison", "117": "Martin", "119": "Mecklenburg",
+                "121": "Mitchell", "123": "Montgomery", "125": "Moore", "127": "Nash",
+                "129": "New Hanover", "131": "Northampton", "133": "Onslow", "135": "Orange",
+                "137": "Pamlico", "139": "Pasquotank", "141": "Pender", "143": "Perquimans",
+                "145": "Person", "147": "Pitt", "149": "Polk", "151": "Randolph",
+                "153": "Richmond", "155": "Robeson", "157": "Rockingham", "159": "Rowan",
+                "161": "Rutherford", "163": "Sampson", "165": "Scotland", "167": "Stanly",
+                "169": "Stokes", "171": "Surry", "173": "Swain", "175": "Transylvania",
+                "177": "Tyrrell", "179": "Union", "181": "Vance", "183": "Wake",
+                "185": "Warren", "187": "Washington", "189": "Watauga", "191": "Wayne",
+                "193": "Wilkes", "195": "Wilson", "197": "Yadkin", "199": "Yancey"
+            };
+            return counties[countyFips] || "Unknown";
+        }
+        
+        function toggleLabels() {
+            labelsVisible = !labelsVisible;
+            g.selectAll(".county-label")
+                .style("display", labelsVisible ? "block" : "none");
+        }
+        
+        function resetZoom() {
+            svg.transition()
+                .duration(750)
+                .call(zoom.transform, d3.zoomIdentity);
+        }
+        
+        // Initialize map when page loads
+        initMap();
+        
+        // Recreate map on window resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                initMap();
+            }, 250);
+        });
+        
+        // Ensure libraries are loaded before initializing
+        function waitForLibraries() {
+            let attempts = 0;
+            const maxAttempts = 50; // 5 seconds total (50 * 100ms)
+            
+            const checkLibraries = setInterval(() => {
+                attempts++;
+                
+                if (typeof d3 !== 'undefined' && typeof topojson !== 'undefined') {
+                    clearInterval(checkLibraries);
+                    console.log('Libraries loaded successfully');
+                    initMap();
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(checkLibraries);
+                    console.error('Failed to load D3 or TopoJSON libraries');
+                    document.getElementById('map').innerHTML = 
+                        '<div style="padding: 60px 20px; text-align: center; background: #fff3f3; border: 2px solid #f44336; border-radius: 8px; margin: 20px;">' +
+                        '<div style="font-size: 20px; color: #d32f2f; font-weight: bold; margin-bottom: 15px;">⚠️ Library Loading Error</div>' +
+                        '<div style="font-size: 14px; color: #666; margin-bottom: 10px;">The required JavaScript libraries (D3.js and TopoJSON) failed to load.</div>' +
+                        '<div style="font-size: 13px; color: #999; margin-bottom: 15px;">This may be due to network issues or browser extensions blocking scripts.</div>' +
+                        '<div style="font-size: 13px; color: #2196F3; font-weight: 500;">SOLUTIONS:</div>' +
+                        '<div style="font-size: 12px; color: #555; margin-top: 8px;">• Check your internet connection</div>' +
+                        '<div style="font-size: 12px; color: #555;">• Disable ad blockers or script blockers</div>' +
+                        '<div style="font-size: 12px; color: #555;">• Try a different browser (Chrome, Firefox, Safari, Edge)</div>' +
+                        '<div style="font-size: 12px; color: #555;">• Refresh the page</div>' +
+                        '</div>';
+                } else {
+                    console.log(`Waiting for libraries... attempt ${attempts}`);
+                }
+            }, 100);
+        }
+        
+        // Start checking for libraries when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', waitForLibraries);
+        } else {
+            waitForLibraries();
+        }
+    </script>
+</body>
+</html>
